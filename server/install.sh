@@ -41,6 +41,7 @@ if [ -z "${PRIV:-}" ]; then
 fi
 SID="${SID:-$(openssl rand -hex 8)}"
 XPATH="${XPATH:-/$(openssl rand -hex 6)}"
+SUBTOKEN="${SUBTOKEN:-$(openssl rand -hex 12)}"
 DOMAIN="${DOMAIN_ARG:-${DOMAIN:-${IP//./-}.sslip.io}}"
 case "$DOMAIN" in *.sslip.io) NAMES="$DOMAIN" ;; *) NAMES="$DOMAIN www.$DOMAIN" ;; esac
 cat > "$STATE" <<EOF
@@ -50,6 +51,7 @@ PRIV=$PRIV
 PUB=$PUB
 SID=$SID
 XPATH=$XPATH
+SUBTOKEN=$SUBTOKEN
 DOMAIN=$DOMAIN
 EOF
 chmod 600 "$STATE"
@@ -189,8 +191,66 @@ $CDN_LINK
 $XHTTP_LINK
 EOF
 
+# --- subscription for client apps (served by Caddy from the site root) ---
+SUBDIR=/var/www/site/s/$SUBTOKEN
+rm -rf /var/www/site/s && mkdir -p "$SUBDIR"
+# universal: base64 list of links (v2RayTun, Happ, Hiddify, Streisand, Shadowrocket)
+base64 -w0 /root/vpn-links.txt > "$SUBDIR/sub"
+# full Xray config with auto-switch Reality -> CDN (Happ, v2RayTun, Streisand)
+cat > "$SUBDIR/config.json" <<EOF
+{
+  "remarks": "Wand Legacy auto",
+  "log": { "loglevel": "warning" },
+  "dns": { "servers": [ "1.1.1.1", "8.8.8.8" ], "queryStrategy": "UseIPv4" },
+  "inbounds": [
+    { "tag": "socks", "listen": "127.0.0.1", "port": 10808, "protocol": "socks",
+      "settings": { "udp": true }, "sniffing": { "enabled": true, "destOverride": [ "http", "tls", "quic" ] } },
+    { "tag": "http", "listen": "127.0.0.1", "port": 10809, "protocol": "http",
+      "sniffing": { "enabled": true, "destOverride": [ "http", "tls" ] } }
+  ],
+  "outbounds": [
+    {
+      "tag": "reality", "protocol": "vless",
+      "settings": { "vnext": [ { "address": "$IP", "port": 443,
+        "users": [ { "id": "$UUID", "encryption": "none", "flow": "xtls-rprx-vision" } ] } ] },
+      "streamSettings": { "network": "tcp", "security": "reality",
+        "realitySettings": { "serverName": "$DOMAIN", "fingerprint": "chrome", "publicKey": "$PUB", "shortId": "$SID" } }
+    },
+    {
+      "tag": "cdn", "protocol": "vless",
+      "settings": { "vnext": [ { "address": "$CDN_HOST", "port": 443,
+        "users": [ { "id": "$UUID", "encryption": "none" } ] } ] },
+      "streamSettings": { "network": "xhttp", "security": "tls",
+        "tlsSettings": { "serverName": "$CDN_HOST", "alpn": [ "h2" ], "fingerprint": "chrome" },
+        "xhttpSettings": { "host": "$CDN_HOST", "path": "$XPATH", "mode": "packet-up", "extra": $XEXTRA } }
+    },
+    { "tag": "direct", "protocol": "freedom" },
+    { "tag": "block", "protocol": "blackhole" }
+  ],
+  "burstObservatory": {
+    "subjectSelector": [ "reality" ],
+    "pingConfig": { "destination": "https://connectivitycheck.gstatic.com/generate_204",
+      "interval": "15s", "sampling": 2, "timeout": "3s" }
+  },
+  "routing": {
+    "domainStrategy": "IPIfNonMatch",
+    "balancers": [ { "tag": "auto", "selector": [ "reality" ], "fallbackTag": "cdn", "strategy": { "type": "leastPing" } } ],
+    "rules": [
+      { "network": "udp", "port": "443", "outboundTag": "block" },
+      { "protocol": [ "bittorrent" ], "outboundTag": "direct" },
+      { "domain": [ "geosite:category-ru", "geosite:private" ], "outboundTag": "direct" },
+      { "ip": [ "geoip:ru", "geoip:private" ], "outboundTag": "direct" },
+      { "network": "tcp,udp", "balancerTag": "auto" }
+    ]
+  }
+}
+EOF
+chmod -R a+rX /var/www/site/s
+
 echo
 echo "=== DONE ==="
 echo "Links saved to /root/vpn-links.txt"
-echo "Send to Claude (no secrets): IP=$IP DOMAIN=$DOMAIN XPATH=$XPATH XHTTP_PORT=$XHTTP_PORT"
+echo "Subscription (all apps):      https://$DOMAIN/s/$SUBTOKEN/sub"
+echo "Auto-switch config (Happ/v2RayTun/Streisand): https://$DOMAIN/s/$SUBTOKEN/config.json"
+echo "Same via CDN (under whitelists): https://$CDN_HOST/s/$SUBTOKEN/sub"
 systemctl is-active xray caddy
