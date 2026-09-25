@@ -124,6 +124,7 @@ cat > /usr/local/etc/xray/config.json <<EOF
     "domainStrategy": "IPIfNonMatch",
     "rules": [
       { "ip": [ "geoip:private" ], "outboundTag": "block" },
+      { "network": "udp", "port": "443", "outboundTag": "block" },
       { "protocol": [ "bittorrent" ], "outboundTag": "block" },
       {
         "domain": [
