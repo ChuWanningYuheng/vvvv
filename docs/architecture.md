@@ -55,6 +55,9 @@
 - [x] Доступ к API Yandex Cloud
 - [x] Тестовый API Gateway
 - [ ] Доступность `*.apigw.yandexcloud.net` из RU LTE при белых списках
-- [ ] VPS куплен, `server/install.sh` запущен
+- [x] VPS куплен: is*hosting, Нидерланды, 185.93.104.30 (Ubuntu 22.04)
+- [ ] `server/install.sh` отработал полностью (Caddy упал на 1-м запуске — исправлено, ждём перезапуск)
+- [x] Домен wandlegacy.com (Njalla), DNS-зона в Yandex Cloud DNS `dnsafatqc1f5ka1e82gq`
+- [ ] NS домена → ns1/ns2.yandexcloud.net
 - [ ] Тест Serverless Containers / CDN
 - [ ] Клиентский конфиг
