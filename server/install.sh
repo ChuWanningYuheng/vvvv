@@ -27,8 +27,12 @@ EOF
 sysctl --system >/dev/null
 
 echo "[3/7] xray"
-bash -c "$(curl -fsSL https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install >/dev/null
-bash -c "$(curl -fsSL https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install-geodata >/dev/null
+if ! command -v xray >/dev/null || [ -n "${UPDATE_XRAY:-}" ]; then
+  bash -c "$(curl -fsSL https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install >/dev/null
+  bash -c "$(curl -fsSL https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install-geodata >/dev/null
+else
+  echo "  already installed: $(xray version | head -1) (set UPDATE_XRAY=1 to update)"
+fi
 
 # --- persistent secrets ---
 [ -f "$STATE" ] && . "$STATE"
