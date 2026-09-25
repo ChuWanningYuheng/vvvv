@@ -117,7 +117,8 @@ cat > /usr/local/etc/xray/config.json <<EOF
         "xhttpSettings": {
           "path": "$XPATH", "mode": "auto",
           "xPaddingObfsMode": true, "xPaddingPlacement": "queryInHeader", "xPaddingKey": "_dc",
-          "xPaddingHeader": "X-Request-Context", "xPaddingMethod": "tokenish"
+          "xPaddingHeader": "X-Request-Context", "xPaddingMethod": "tokenish",
+          "serverMaxHeaderBytes": 1048576
         }
       },
       "sniffing": { "enabled": true, "destOverride": [ "http", "tls", "quic" ] }
@@ -189,8 +190,9 @@ systemctl enable --now xray caddy >/dev/null
 systemctl restart xray caddy
 
 # Yandex CDN forbids POST, so uplink goes as GET (packet-up); padding settings must match the server.
-# GET bodies are dropped by the CDN, so uplink data travels in a header, in chunks that fit its header limit.
-XEXTRA='{"xPaddingObfsMode":true,"xPaddingPlacement":"queryInHeader","xPaddingKey":"_dc","xPaddingHeader":"X-Request-Context","xPaddingMethod":"tokenish","uplinkHTTPMethod":"GET","uplinkDataPlacement":"header","uplinkChunkSize":"3000-4000","scMaxEachPostBytes":524288,"scMinPostsIntervalMs":30}'
+# GET bodies are dropped by the CDN, so uplink data travels in X-Data-N headers of 3-4 KB each;
+# scMaxEachPostBytes caps the whole request (the server accepts up to serverMaxHeaderBytes, default only 8 KB).
+XEXTRA='{"xPaddingObfsMode":true,"xPaddingPlacement":"queryInHeader","xPaddingKey":"_dc","xPaddingHeader":"X-Request-Context","xPaddingMethod":"tokenish","uplinkHTTPMethod":"GET","uplinkDataPlacement":"header","uplinkChunkSize":"3000-4000","scMaxEachPostBytes":16384,"scMinPostsIntervalMs":30}'
 XEXTRA_URI=$(printf %s "$XEXTRA" | jq -sRr @uri)
 REALITY_LINK="vless://$UUID@$IP:443?type=tcp&security=reality&flow=xtls-rprx-vision&sni=$DOMAIN&fp=chrome&pbk=$PUB&sid=$SID#Reality-$DOMAIN"
 XHTTP_LINK="vless://$UUID@$DOMAIN:$XHTTP_PORT?type=xhttp&security=tls&sni=$DOMAIN&path=$(printf %s "$XPATH" | jq -sRr @uri)&mode=packet-up&alpn=h2&fp=chrome&extra=$XEXTRA_URI#XHTTP-direct"

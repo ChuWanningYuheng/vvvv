@@ -86,3 +86,11 @@
 - Прокси WARP только TCP → QUIC к ИИ-сервисам блокируется; QUIC к Google/YouTube идёт direct (без QUIC приложение YouTube на iOS почти не работает).
 - `routeOnly` не используется: с ним IPv6-адреса от телефона шли на VPS без IPv6 (`network is unreachable`).
 - iOS: в Happ приложение YouTube не работало, в Streisand — работает.
+
+### Лимит заголовков XHTTP (причина зависаний YouTube/Gemini)
+- С `uplinkDataPlacement: header` клиент кладёт данные в заголовки `X-Data-0..N` (по `uplinkChunkSize` каждый),
+  а весь запрос ограничен `scMaxEachPostBytes` (было 512 КБ).
+- Сервер Xray по умолчанию принимает всего 8 КБ заголовков → Caddy: `http2: request header list larger than peer's
+  advertised limit`, 502, данные теряются. Страдали «тяжёлые» приложения, лёгкий трафик проходил.
+- Исправление: сервер `serverMaxHeaderBytes: 1048576`, клиент `scMaxEachPostBytes: 16384` (запрос ≲ 22 КБ заголовков;
+  через Яндекс CDN проходили запросы ~24 КБ).
