@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # VPN exit server: Xray (VLESS-Reality + VLESS-XHTTP behind Caddy) + Cloudflare WARP for Google/AI.
 # Usage (Ubuntu 22.04/24.04, as root):
-#   bash install.sh
+#   DOMAIN=example.com bash install.sh   # A-records for example.com and www must point here
+#   bash install.sh                      # without a domain: <ip>.sslip.io
+# Reality impersonates our own site (Caddy on :8443), so probes of :443 see a normal website.
 # Re-running is safe: existing keys in /etc/vpn/state.env are reused.
 set -euo pipefail
 
-REALITY_SNI="${REALITY_SNI:-www.microsoft.com}"   # site Reality impersonates
+DOMAIN_ARG="${DOMAIN:-}"
 XHTTP_PORT="${XHTTP_PORT:-8443}"                  # TLS port for XHTTP (for Yandex front / CDN)
 STATE=/etc/vpn/state.env
 
@@ -39,7 +41,8 @@ if [ -z "${PRIV:-}" ]; then
 fi
 SID="${SID:-$(openssl rand -hex 8)}"
 XPATH="${XPATH:-/$(openssl rand -hex 6)}"
-DOMAIN="${DOMAIN:-${IP//./-}.sslip.io}"
+DOMAIN="${DOMAIN_ARG:-${DOMAIN:-${IP//./-}.sslip.io}}"
+case "$DOMAIN" in *.sslip.io) NAMES="$DOMAIN" ;; *) NAMES="$DOMAIN www.$DOMAIN" ;; esac
 cat > "$STATE" <<EOF
 IP=$IP
 UUID=$UUID
@@ -77,7 +80,7 @@ cat > /usr/local/etc/xray/config.json <<EOF
       "streamSettings": {
         "network": "tcp", "security": "reality",
         "realitySettings": {
-          "dest": "$REALITY_SNI:443", "serverNames": [ "$REALITY_SNI" ],
+          "dest": "127.0.0.1:$XHTTP_PORT", "serverNames": [ $(printf '"%s",' $NAMES | sed 's/,$//') ],
           "privateKey": "$PRIV", "shortIds": [ "$SID" ]
         }
       },
@@ -132,8 +135,21 @@ if ! command -v caddy >/dev/null; then
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list
   apt-get update -qq && apt-get install -y -qq caddy >/dev/null
 fi
+mkdir -p /var/www/site
+[ -f /var/www/site/index.html ] || cat > /var/www/site/index.html <<'HTML'
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Wand Legacy</title>
+<style>
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 30%,#1d2a3a,#07090d);color:#e8dcb5;font-family:Georgia,serif;text-align:center}
+h1{font-size:clamp(2.2rem,8vw,4.5rem);letter-spacing:.08em;margin:0 0 .4em;text-shadow:0 0 24px #c9a64688}
+p{opacity:.75;font-size:1.1rem;margin:0 16px}
+</style></head>
+<body><div><h1>&#10022; Wand Legacy &#10022;</h1><p>The dark arts are being prepared. Return soon.</p></div></body></html>
+HTML
+SITES=$(for n in $NAMES; do printf '%s:%s, ' "$n" "$XHTTP_PORT"; done | sed 's/, $//')
 cat > /etc/caddy/Caddyfile <<EOF
-$DOMAIN:$XHTTP_PORT {
+$SITES {
   handle $XPATH* {
     reverse_proxy 127.0.0.1:10000 {
       flush_interval -1
@@ -143,7 +159,8 @@ $DOMAIN:$XHTTP_PORT {
     }
   }
   handle {
-    respond "OK" 200
+    root * /var/www/site
+    file_server
   }
 }
 EOF
@@ -155,7 +172,7 @@ caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>/t
 systemctl enable --now xray caddy >/dev/null
 systemctl restart xray caddy
 
-REALITY_LINK="vless://$UUID@$IP:443?type=tcp&security=reality&flow=xtls-rprx-vision&sni=$REALITY_SNI&fp=chrome&pbk=$PUB&sid=$SID#Reality-$IP"
+REALITY_LINK="vless://$UUID@$IP:443?type=tcp&security=reality&flow=xtls-rprx-vision&sni=$DOMAIN&fp=chrome&pbk=$PUB&sid=$SID#Reality-$DOMAIN"
 XHTTP_LINK="vless://$UUID@$DOMAIN:$XHTTP_PORT?type=xhttp&security=tls&sni=$DOMAIN&path=$(printf %s "$XPATH" | jq -sRr @uri)&mode=auto&alpn=h2#XHTTP-direct"
 cat > /root/vpn-links.txt <<EOF
 $REALITY_LINK
