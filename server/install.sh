@@ -137,7 +137,9 @@ $DOMAIN:$XHTTP_PORT {
   handle $XPATH* {
     reverse_proxy 127.0.0.1:10000 {
       flush_interval -1
-      transport http { versions h2c 1.1 }
+      transport http {
+        versions h2c 1.1
+      }
     }
   }
   handle {
@@ -149,6 +151,7 @@ EOF
 echo "[7/7] firewall + start"
 ufw allow 22/tcp >/dev/null; ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null; ufw allow ${XHTTP_PORT}/tcp >/dev/null
 ufw --force enable >/dev/null
+caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>/tmp/caddy-validate.log || { cat /tmp/caddy-validate.log; exit 1; }
 systemctl enable --now xray caddy >/dev/null
 systemctl restart xray caddy
 
