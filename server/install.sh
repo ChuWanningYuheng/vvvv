@@ -75,8 +75,13 @@ $W registration show >/dev/null 2>&1 || $W registration new >/dev/null
 $W mode proxy >/dev/null
 $W proxy port "$WARP_PORT" >/dev/null
 $W connect >/dev/null
-for _ in $(seq 20); do $W status 2>/dev/null | grep -q Connected && break; sleep 1; done
-$W status | grep -q Connected || { $W status; echo "WARP did not connect"; exit 1; }
+# read status into a variable: `warp-cli status | grep -q` fails under pipefail (warp-cli panics on a closed pipe)
+for _ in $(seq 20); do
+  WARP_STATUS=$($W status 2>&1 || true)
+  case "$WARP_STATUS" in *Connected*) break ;; esac
+  sleep 1
+done
+case "$WARP_STATUS" in *Connected*) ;; *) echo "$WARP_STATUS"; echo "WARP did not connect"; exit 1 ;; esac
 
 echo "[5/7] xray config"
 # Google and AI services flag hosting IPs ("unusual traffic", YouTube app stalls) -> all of them via WARP.
