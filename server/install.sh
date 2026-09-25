@@ -182,8 +182,9 @@ caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>/t
 systemctl enable --now xray caddy >/dev/null
 systemctl restart xray caddy
 
-# Yandex CDN forbids POST, so uplink goes as GET (packet-up); padding settings must match the server
-XEXTRA='{"xPaddingObfsMode":true,"xPaddingPlacement":"queryInHeader","xPaddingKey":"_dc","xPaddingHeader":"X-Request-Context","xPaddingMethod":"tokenish","uplinkHTTPMethod":"GET","scMaxEachPostBytes":524288,"scMinPostsIntervalMs":150}'
+# Yandex CDN forbids POST, so uplink goes as GET (packet-up); padding settings must match the server.
+# GET bodies are dropped by the CDN, so uplink data travels in a header, in chunks that fit its header limit.
+XEXTRA='{"xPaddingObfsMode":true,"xPaddingPlacement":"queryInHeader","xPaddingKey":"_dc","xPaddingHeader":"X-Request-Context","xPaddingMethod":"tokenish","uplinkHTTPMethod":"GET","uplinkDataPlacement":"header","uplinkChunkSize":"3000-4000","scMaxEachPostBytes":524288,"scMinPostsIntervalMs":150}'
 XEXTRA_URI=$(printf %s "$XEXTRA" | jq -sRr @uri)
 REALITY_LINK="vless://$UUID@$IP:443?type=tcp&security=reality&flow=xtls-rprx-vision&sni=$DOMAIN&fp=chrome&pbk=$PUB&sid=$SID#Reality-$DOMAIN"
 XHTTP_LINK="vless://$UUID@$DOMAIN:$XHTTP_PORT?type=xhttp&security=tls&sni=$DOMAIN&path=$(printf %s "$XPATH" | jq -sRr @uri)&mode=packet-up&alpn=h2&fp=chrome&extra=$XEXTRA_URI#XHTTP-direct"

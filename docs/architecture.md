@@ -67,6 +67,9 @@
 - CNAME `assets` → `965657b5cdcd71d7.topology.gslb.yccdn.ru` (IP 188.72.103.4 — тот же, что у cdn2.mrammor.com провайдера).
 - **POST в Yandex CDN запрещён** (и при создании, и после) → XHTTP packet-up с `uplinkHTTPMethod: GET`,
   padding obfs как у провайдера (`_dc` / `X-Request-Context` / tokenish). Настройки padding на сервере и клиенте совпадают.
+- Тело у GET-запроса CDN не пропускает, а по умолчанию (`uplinkDataPlacement: auto`) клиент кладёт данные именно в тело →
+  на клиенте `uplinkDataPlacement: header` (заголовок `X-Data`) и `uplinkChunkSize: "3000-4000"`, чтобы уложиться в лимит заголовков CDN.
+  Сервер в режиме `auto` читает данные и из тела, и из заголовка, и из cookie — менять его не нужно.
 - Сертификат: Certificate Manager `fpqmc32pid48r4h1iduc` (Let's Encrypt, DNS-проверка через CNAME `_acme-challenge.assets`).
 - Локальный e2e-тест (xray 26.3.27 + caddy): XHTTP GET-uplink и Reality проходят; без сервера — падают.
 - Reality на :443 маскируется под собственный сайт (dest 127.0.0.1:8443, Caddy), сертификат Let's Encrypt wandlegacy.com.
