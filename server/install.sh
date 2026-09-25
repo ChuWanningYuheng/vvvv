@@ -96,7 +96,7 @@ cat > /usr/local/etc/xray/config.json <<EOF
           "privateKey": "$PRIV", "shortIds": [ "$SID" ]
         }
       },
-      "sniffing": { "enabled": true, "destOverride": [ "http", "tls", "quic" ] }
+      "sniffing": { "enabled": true, "destOverride": [ "http", "tls", "quic" ], "routeOnly": true }
     },
     {
       "tag": "xhttp",
@@ -110,7 +110,7 @@ cat > /usr/local/etc/xray/config.json <<EOF
           "xPaddingHeader": "X-Request-Context", "xPaddingMethod": "tokenish"
         }
       },
-      "sniffing": { "enabled": true, "destOverride": [ "http", "tls", "quic" ] }
+      "sniffing": { "enabled": true, "destOverride": [ "http", "tls", "quic" ], "routeOnly": true }
     }
   ],
   "outbounds": [
