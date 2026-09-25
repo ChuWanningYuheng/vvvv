@@ -10,7 +10,7 @@
 Зарубежный VPS (Xray, server/install.sh):
   inbound  VLESS-Reality :443
   inbound  VLESS-XHTTP за Caddy :8443 (TLS через Let's Encrypt, домен <ip>.sslip.io)
-  outbound Google/YouTube/Gemini/OpenAI/Anthropic ──► Cloudflare WARP (официальный warp-cli, SOCKS :40000; QUIC к ним блокируется)
+  outbound Google/YouTube/Gemini/OpenAI/Anthropic ──► Cloudflare WARP (официальный warp-cli, SOCKS :40000, только TCP; QUIC к Google — direct, к ИИ — блок)
   outbound остальное ────────────────────────► direct (IPv4)
 ```
 
@@ -83,6 +83,6 @@
   UDP через него не работал (`write udp ...: invalid argument`).
 - Напрямую с IP хостинга Google отвечает «Unusual traffic» (Gemini), приложение YouTube висит на чёрном экране.
 - Официальный `warp-cli` в режиме proxy (`127.0.0.1:40000`): 9/9 запросов к dl.google.com / youtube.com / gemini `200`, до 39 МБ/с.
-- Прокси WARP только TCP → QUIC (UDP/443) к доменам WARP блокируется, приложения переходят на TCP.
-- Sniffing с `routeOnly: true`: домен только для маршрутизации, соединение на исходный IP (иначе рвётся QUIC).
+- Прокси WARP только TCP → QUIC к ИИ-сервисам блокируется; QUIC к Google/YouTube идёт direct (без QUIC приложение YouTube на iOS почти не работает).
+- `routeOnly` не используется: с ним IPv6-адреса от телефона шли на VPS без IPv6 (`network is unreachable`).
 - iOS: в Happ приложение YouTube не работало, в Streisand — работает.

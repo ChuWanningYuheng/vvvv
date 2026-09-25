@@ -84,10 +84,13 @@ done
 case "$WARP_STATUS" in *Connected*) ;; *) echo "$WARP_STATUS"; echo "WARP did not connect"; exit 1 ;; esac
 
 echo "[5/7] xray config"
-# Google and AI services flag hosting IPs ("unusual traffic", YouTube app stalls) -> all of them via WARP.
-# The WARP SOCKS proxy carries TCP only, so QUIC to them is dropped and apps fall back to TCP.
-WARP_DOMAINS='"geosite:google", "geosite:youtube", "geosite:openai", "domain:anthropic.com", "domain:claude.ai",
-          "domain:ipinfo.io", "domain:ifconfig.co"'
+# Google and AI services flag hosting IPs ("unusual traffic", YouTube app stalls) -> TCP to them via WARP.
+# The WARP SOCKS proxy carries TCP only. QUIC to AI services is dropped (apps fall back to TCP, keeping one IP);
+# QUIC to Google/YouTube goes direct: the YouTube iOS app barely works without QUIC.
+AI_DOMAINS='"geosite:openai", "domain:gemini.google.com", "domain:bard.google.com", "domain:aistudio.google.com",
+          "domain:generativelanguage.googleapis.com", "domain:alkalimakersuite-pa.clients6.google.com",
+          "domain:proactivebackend-pa.googleapis.com", "domain:anthropic.com", "domain:claude.ai"'
+WARP_DOMAINS="\"geosite:google\", \"geosite:youtube\", $AI_DOMAINS, \"domain:ipinfo.io\", \"domain:ifconfig.co\""
 cat > /usr/local/etc/xray/config.json <<EOF
 {
   "log": { "loglevel": "warning" },
@@ -103,7 +106,7 @@ cat > /usr/local/etc/xray/config.json <<EOF
           "privateKey": "$PRIV", "shortIds": [ "$SID" ]
         }
       },
-      "sniffing": { "enabled": true, "destOverride": [ "http", "tls", "quic" ], "routeOnly": true }
+      "sniffing": { "enabled": true, "destOverride": [ "http", "tls", "quic" ] }
     },
     {
       "tag": "xhttp",
@@ -117,7 +120,7 @@ cat > /usr/local/etc/xray/config.json <<EOF
           "xPaddingHeader": "X-Request-Context", "xPaddingMethod": "tokenish"
         }
       },
-      "sniffing": { "enabled": true, "destOverride": [ "http", "tls", "quic" ], "routeOnly": true }
+      "sniffing": { "enabled": true, "destOverride": [ "http", "tls", "quic" ] }
     }
   ],
   "outbounds": [
@@ -129,8 +132,9 @@ cat > /usr/local/etc/xray/config.json <<EOF
     "domainStrategy": "IPIfNonMatch",
     "rules": [
       { "ip": [ "geoip:private" ], "outboundTag": "block" },
-      { "network": "udp", "port": "443", "domain": [ $WARP_DOMAINS ], "outboundTag": "block" },
+      { "network": "udp", "port": "443", "domain": [ $AI_DOMAINS ], "outboundTag": "block" },
       { "protocol": [ "bittorrent" ], "outboundTag": "block" },
+      { "network": "udp", "outboundTag": "direct" },
       {
         "domain": [ $WARP_DOMAINS ],
         "outboundTag": "warp"
