@@ -15,7 +15,7 @@ mkdir -p /etc/vpn
 echo "[1/7] packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq curl unzip jq openssl ufw debian-keyring debian-archive-keyring apt-transport-https gnupg >/dev/null
+apt-get install -y -qq curl unzip jq openssl ufw apt-transport-https gnupg >/dev/null
 
 echo "[2/7] kernel: BBR"
 cat > /etc/sysctl.d/99-vpn.conf <<EOF
