@@ -10,14 +10,14 @@
 Зарубежный VPS (Xray, server/install.sh):
   inbound  VLESS-Reality :443
   inbound  VLESS-XHTTP за Caddy :8443 (TLS через Let's Encrypt, домен <ip>.sslip.io)
-  outbound Gemini/OpenAI/Anthropic ──► Cloudflare WARP (остальной Google, в т.ч. YouTube, — direct: WARP рвёт часть TLS-соединений)
+  outbound Google/YouTube/Gemini/OpenAI/Anthropic ──► Cloudflare WARP (официальный warp-cli, SOCKS :40000; QUIC к ним блокируется)
   outbound остальное ────────────────────────► direct (IPv4)
 ```
 
 Клиент: основной путь — Reality, при недоступности — XHTTP через Яндекс; RU-домены и IP напрямую.
 
 ## Gemini / определение страны
-1. Трафик Gemini выходит через WARP (не RU и не «хостинговый» IP).
+1. Трафик Google (в т.ч. YouTube, Gemini) выходит через WARP (не RU и не «хостинговый» IP).
 2. На клиенте блокировать QUIC (UDP/443) и не пускать IPv6 мимо тоннеля.
 3. Страна Google-аккаунта: policies.google.com → Country association.
 4. iOS-приложение Gemini — только в App Store не RU региона.
@@ -77,3 +77,12 @@
 ### Важно: кэш CDN
 Опция `disableCache` при создании ресурса молча игнорируется, и по умолчанию включается `edgeCacheSettings` (86400 с),
 из-за чего XHTTP через CDN не работает. Нужно явно выставить `edgeCacheSettings.enabled = false` и сделать purge.
+
+### WARP: официальный клиент вместо WireGuard в Xray
+- Встроенный WireGuard-outbound Xray (профиль wgcf) сбрасывал часть TLS-соединений (`dl.google.com`, `cloudflare.com`),
+  UDP через него не работал (`write udp ...: invalid argument`).
+- Напрямую с IP хостинга Google отвечает «Unusual traffic» (Gemini), приложение YouTube висит на чёрном экране.
+- Официальный `warp-cli` в режиме proxy (`127.0.0.1:40000`): 9/9 запросов к dl.google.com / youtube.com / gemini `200`, до 39 МБ/с.
+- Прокси WARP только TCP → QUIC (UDP/443) к доменам WARP блокируется, приложения переходят на TCP.
+- Sniffing с `routeOnly: true`: домен только для маршрутизации, соединение на исходный IP (иначе рвётся QUIC).
+- iOS: в Happ приложение YouTube не работало, в Streisand — работает.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# VPN exit server: Xray (VLESS-Reality + VLESS-XHTTP behind Caddy) + Cloudflare WARP for Gemini/AI.
+# VPN exit server: Xray (VLESS-Reality + VLESS-XHTTP behind Caddy) + Cloudflare WARP for Google/AI.
 # Usage (Ubuntu 22.04/24.04, as root):
 #   DOMAIN=example.com bash install.sh   # A-records for example.com and www must point here
 #   bash install.sh                      # without a domain: <ip>.sslip.io
@@ -9,13 +9,14 @@ set -euo pipefail
 
 DOMAIN_ARG="${DOMAIN:-}"
 XHTTP_PORT="${XHTTP_PORT:-8443}"                  # TLS port for XHTTP (for Yandex front / CDN)
+WARP_PORT="${WARP_PORT:-40000}"                   # local SOCKS port of the official WARP client
 STATE=/etc/vpn/state.env
 
 [ "$(id -u)" = 0 ] || { echo "run as root"; exit 1; }
 mkdir -p /etc/vpn
 
 echo "[1/7] packages"
-export DEBIAN_FRONTEND=noninteractive
+export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a   # no "restart services?" dialog
 apt-get update -qq
 apt-get install -y -qq curl unzip jq openssl ufw apt-transport-https gnupg >/dev/null
 
@@ -60,27 +61,28 @@ DOMAIN=$DOMAIN
 EOF
 chmod 600 "$STATE"
 
-echo "[4/7] cloudflare warp (wgcf)"
-if [ ! -f /etc/vpn/wgcf-profile.conf ]; then
-  ARCH=amd64; [ "$(uname -m)" = aarch64 ] && ARCH=arm64
-  VER=$(curl -fsSL https://api.github.com/repos/ViRb3/wgcf/releases/latest | jq -r .tag_name)
-  curl -fsSL -o /usr/local/bin/wgcf "https://github.com/ViRb3/wgcf/releases/download/${VER}/wgcf_${VER#v}_linux_${ARCH}"
-  chmod +x /usr/local/bin/wgcf
-  ( cd /etc/vpn && wgcf register --accept-tos >/dev/null && wgcf generate >/dev/null )
+echo "[4/7] cloudflare warp (official client, local SOCKS proxy on :$WARP_PORT)"
+# The official client is used instead of Xray's built-in WireGuard: the latter reset part of TLS handshakes.
+if ! command -v warp-cli >/dev/null; then
+  CODENAME=$(. /etc/os-release && echo "$VERSION_CODENAME")
+  curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --yes --dearmor -o /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+  echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $CODENAME main" \
+    > /etc/apt/sources.list.d/cloudflare-client.list
+  apt-get update -qq && apt-get install -y -qq cloudflare-warp >/dev/null
 fi
-W=/etc/vpn/wgcf-profile.conf
-WG_PRIV=$(awk -F' = ' '/PrivateKey/{print $2}' $W)
-WG_PUB=$(awk -F' = ' '/PublicKey/{print $2}' $W)
-WG_ADDR4=$(grep -m1 '^Address' $W | sed 's/.*= *//' | tr ',' '\n' | grep -m1 '\.' | tr -d ' ')
-WG_ADDR6=$(grep '^Address' $W | sed 's/.*= *//' | tr ',' '\n' | grep -m1 ':' | tr -d ' ')
+W="warp-cli --accept-tos"
+$W registration show >/dev/null 2>&1 || $W registration new >/dev/null
+$W mode proxy >/dev/null
+$W proxy port "$WARP_PORT" >/dev/null
+$W connect >/dev/null
+for _ in $(seq 20); do $W status 2>/dev/null | grep -q Connected && break; sleep 1; done
+$W status | grep -q Connected || { $W status; echo "WARP did not connect"; exit 1; }
 
 echo "[5/7] xray config"
-# AI services need a non-hosting IP -> WARP. UDP through WARP fails, so QUIC to them is dropped
-# and apps fall back to TCP; QUIC to everything else goes direct (dropping it stalls Google apps).
-WARP_DOMAINS='"geosite:openai", "domain:anthropic.com", "domain:claude.ai",
-          "domain:gemini.google.com", "domain:bard.google.com", "domain:aistudio.google.com",
-          "domain:generativelanguage.googleapis.com", "domain:alkalimakersuite-pa.clients6.google.com",
-          "domain:proactivebackend-pa.googleapis.com", "domain:ipinfo.io", "domain:ifconfig.co"'
+# Google and AI services flag hosting IPs ("unusual traffic", YouTube app stalls) -> all of them via WARP.
+# The WARP SOCKS proxy carries TCP only, so QUIC to them is dropped and apps fall back to TCP.
+WARP_DOMAINS='"geosite:google", "geosite:youtube", "geosite:openai", "domain:anthropic.com", "domain:claude.ai",
+          "domain:ipinfo.io", "domain:ifconfig.co"'
 cat > /usr/local/etc/xray/config.json <<EOF
 {
   "log": { "loglevel": "warning" },
@@ -115,15 +117,7 @@ cat > /usr/local/etc/xray/config.json <<EOF
   ],
   "outbounds": [
     { "tag": "direct", "protocol": "freedom", "settings": { "domainStrategy": "UseIPv4" } },
-    {
-      "tag": "warp", "protocol": "wireguard",
-      "settings": {
-        "secretKey": "$WG_PRIV",
-        "address": [ "$WG_ADDR4", "$WG_ADDR6" ],
-        "peers": [ { "publicKey": "$WG_PUB", "endpoint": "engage.cloudflareclient.com:2408" } ],
-        "mtu": 1280, "domainStrategy": "ForceIPv4"
-      }
-    },
+    { "tag": "warp", "protocol": "socks", "settings": { "servers": [ { "address": "127.0.0.1", "port": $WARP_PORT } ] } },
     { "tag": "block", "protocol": "blackhole" }
   ],
   "routing": {
