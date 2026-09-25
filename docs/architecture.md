@@ -10,17 +10,15 @@
 Зарубежный VPS (Xray, server/install.sh):
   inbound  VLESS-Reality :443
   inbound  VLESS-XHTTP за Caddy :8443 (TLS через Let's Encrypt, домен <ip>.sslip.io)
-  outbound Google/Gemini/OpenAI/Anthropic ──► Cloudflare WARP
-  outbound остальное ────────────────────────► direct (IPv4)
+  outbound всё ──► direct (IPv4, IP VPS в Нидерландах); блок: приватные сети, BitTorrent
 ```
 
 Клиент: основной путь — Reality, при недоступности — XHTTP через Яндекс; RU-домены и IP напрямую.
 
 ## Gemini / определение страны
-1. Google-трафик выходит через WARP (не RU и не «хостинговый» IP).
-2. На клиенте блокировать QUIC (UDP/443) и не пускать IPv6 мимо тоннеля.
-3. Страна Google-аккаунта: policies.google.com → Country association.
-4. iOS-приложение Gemini — только в App Store не RU региона.
+1. Gemini и YouTube работают напрямую с IP VPS (NL), в т.ч. с аккаунтом региона РФ (проверено на iPhone).
+2. Через Cloudflare WARP Gemini отвечает «недоступен в вашей стране»: IP WARP помечены как relay/privacy.
+3. Если Gemini откажет: выйти из аккаунта и войти заново; страна аккаунта — policies.google.com → Country association.
 
 ## Yandex Cloud
 - Каталог `default` (`b1ggs8tlauj1ndihf49b`), сервисный аккаунт `vpn-bot` (роль editor на каталог).
@@ -67,6 +65,9 @@
 - CNAME `assets` → `965657b5cdcd71d7.topology.gslb.yccdn.ru` (IP 188.72.103.4 — тот же, что у cdn2.mrammor.com провайдера).
 - **POST в Yandex CDN запрещён** (и при создании, и после) → XHTTP packet-up с `uplinkHTTPMethod: GET`,
   padding obfs как у провайдера (`_dc` / `X-Request-Context` / tokenish). Настройки padding на сервере и клиенте совпадают.
+- Тело у GET-запроса CDN не пропускает, а по умолчанию (`uplinkDataPlacement: auto`) клиент кладёт данные именно в тело →
+  на клиенте `uplinkDataPlacement: header` (заголовок `X-Data`) и `uplinkChunkSize: "3000-4000"`, чтобы уложиться в лимит заголовков CDN.
+  Сервер в режиме `auto` читает данные и из тела, и из заголовка, и из cookie — менять его не нужно.
 - Сертификат: Certificate Manager `fpqmc32pid48r4h1iduc` (Let's Encrypt, DNS-проверка через CNAME `_acme-challenge.assets`).
 - Локальный e2e-тест (xray 26.3.27 + caddy): XHTTP GET-uplink и Reality проходят; без сервера — падают.
 - Reality на :443 маскируется под собственный сайт (dest 127.0.0.1:8443, Caddy), сертификат Let's Encrypt wandlegacy.com.
@@ -74,3 +75,18 @@
 ### Важно: кэш CDN
 Опция `disableCache` при создании ресурса молча игнорируется, и по умолчанию включается `edgeCacheSettings` (86400 с),
 из-за чего XHTTP через CDN не работает. Нужно явно выставить `edgeCacheSettings.enabled = false` и сделать purge.
+
+### WARP (убран)
+- Пробовали пускать Google через WARP: встроенный WireGuard Xray рвал часть TLS, официальный `warp-cli` работал,
+  но Gemini через него — «недоступен в стране» (IP WARP = relay). WARP удалён, всё идёт direct.
+- Зависания YouTube/Gemini на самом деле были из-за лимита заголовков XHTTP (ниже), а не из-за IP хостинга.
+- `routeOnly` не используется: с ним IPv6-адреса от телефона шли на VPS без IPv6 (`network is unreachable`).
+- iOS: в Happ приложение YouTube не работало, в Streisand — работает (до исправления лимита заголовков).
+
+### Лимит заголовков XHTTP (причина зависаний YouTube/Gemini)
+- С `uplinkDataPlacement: header` клиент кладёт данные в заголовки `X-Data-0..N` (по `uplinkChunkSize` каждый),
+  а весь запрос ограничен `scMaxEachPostBytes` (было 512 КБ).
+- Сервер Xray по умолчанию принимает всего 8 КБ заголовков → Caddy: `http2: request header list larger than peer's
+  advertised limit`, 502, данные теряются. Страдали «тяжёлые» приложения, лёгкий трафик проходил.
+- Исправление: сервер `serverMaxHeaderBytes: 1048576`, клиент `scMaxEachPostBytes: 16384` (запрос ≲ 22 КБ заголовков;
+  через Яндекс CDN проходили запросы ~24 КБ).

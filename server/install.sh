@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# VPN exit server: Xray (VLESS-Reality + VLESS-XHTTP behind Caddy) + Cloudflare WARP for Google/AI.
+# VPN exit server: Xray (VLESS-Reality + VLESS-XHTTP behind Caddy); all traffic exits directly from the VPS IP.
 # Usage (Ubuntu 22.04/24.04, as root):
 #   DOMAIN=example.com bash install.sh   # A-records for example.com and www must point here
 #   bash install.sh                      # without a domain: <ip>.sslip.io
@@ -14,19 +14,19 @@ STATE=/etc/vpn/state.env
 [ "$(id -u)" = 0 ] || { echo "run as root"; exit 1; }
 mkdir -p /etc/vpn
 
-echo "[1/7] packages"
-export DEBIAN_FRONTEND=noninteractive
+echo "[1/6] packages"
+export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a   # no "restart services?" dialog
 apt-get update -qq
 apt-get install -y -qq curl unzip jq openssl ufw apt-transport-https gnupg >/dev/null
 
-echo "[2/7] kernel: BBR"
+echo "[2/6] kernel: BBR"
 cat > /etc/sysctl.d/99-vpn.conf <<EOF
 net.core.default_qdisc=fq
 net.ipv4.tcp_congestion_control=bbr
 EOF
 sysctl --system >/dev/null
 
-echo "[3/7] xray"
+echo "[3/6] xray"
 if ! command -v xray >/dev/null || [ -n "${UPDATE_XRAY:-}" ]; then
   bash -c "$(curl -fsSL https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install >/dev/null
   bash -c "$(curl -fsSL https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install-geodata >/dev/null
@@ -60,21 +60,7 @@ DOMAIN=$DOMAIN
 EOF
 chmod 600 "$STATE"
 
-echo "[4/7] cloudflare warp (wgcf)"
-if [ ! -f /etc/vpn/wgcf-profile.conf ]; then
-  ARCH=amd64; [ "$(uname -m)" = aarch64 ] && ARCH=arm64
-  VER=$(curl -fsSL https://api.github.com/repos/ViRb3/wgcf/releases/latest | jq -r .tag_name)
-  curl -fsSL -o /usr/local/bin/wgcf "https://github.com/ViRb3/wgcf/releases/download/${VER}/wgcf_${VER#v}_linux_${ARCH}"
-  chmod +x /usr/local/bin/wgcf
-  ( cd /etc/vpn && wgcf register --accept-tos >/dev/null && wgcf generate >/dev/null )
-fi
-W=/etc/vpn/wgcf-profile.conf
-WG_PRIV=$(awk -F' = ' '/PrivateKey/{print $2}' $W)
-WG_PUB=$(awk -F' = ' '/PublicKey/{print $2}' $W)
-WG_ADDR4=$(grep -m1 '^Address' $W | sed 's/.*= *//' | tr ',' '\n' | grep -m1 '\.' | tr -d ' ')
-WG_ADDR6=$(grep '^Address' $W | sed 's/.*= *//' | tr ',' '\n' | grep -m1 ':' | tr -d ' ')
-
-echo "[5/7] xray config"
+echo "[4/6] xray config"
 cat > /usr/local/etc/xray/config.json <<EOF
 {
   "log": { "loglevel": "warning" },
@@ -101,7 +87,8 @@ cat > /usr/local/etc/xray/config.json <<EOF
         "xhttpSettings": {
           "path": "$XPATH", "mode": "auto",
           "xPaddingObfsMode": true, "xPaddingPlacement": "queryInHeader", "xPaddingKey": "_dc",
-          "xPaddingHeader": "X-Request-Context", "xPaddingMethod": "tokenish"
+          "xPaddingHeader": "X-Request-Context", "xPaddingMethod": "tokenish",
+          "serverMaxHeaderBytes": 1048576
         }
       },
       "sniffing": { "enabled": true, "destOverride": [ "http", "tls", "quic" ] }
@@ -109,37 +96,20 @@ cat > /usr/local/etc/xray/config.json <<EOF
   ],
   "outbounds": [
     { "tag": "direct", "protocol": "freedom", "settings": { "domainStrategy": "UseIPv4" } },
-    {
-      "tag": "warp", "protocol": "wireguard",
-      "settings": {
-        "secretKey": "$WG_PRIV",
-        "address": [ "$WG_ADDR4", "$WG_ADDR6" ],
-        "peers": [ { "publicKey": "$WG_PUB", "endpoint": "engage.cloudflareclient.com:2408" } ],
-        "mtu": 1280, "domainStrategy": "ForceIPv4"
-      }
-    },
     { "tag": "block", "protocol": "blackhole" }
   ],
   "routing": {
     "domainStrategy": "IPIfNonMatch",
     "rules": [
       { "ip": [ "geoip:private" ], "outboundTag": "block" },
-      { "protocol": [ "bittorrent" ], "outboundTag": "block" },
-      {
-        "domain": [
-          "geosite:google", "geosite:openai", "domain:anthropic.com", "domain:claude.ai",
-          "domain:gemini.google.com", "domain:aistudio.google.com", "domain:generativelanguage.googleapis.com",
-          "domain:ipinfo.io", "domain:ifconfig.co"
-        ],
-        "outboundTag": "warp"
-      }
+      { "protocol": [ "bittorrent" ], "outboundTag": "block" }
     ]
   }
 }
 EOF
 xray run -test -c /usr/local/etc/xray/config.json >/dev/null
 
-echo "[6/7] caddy (TLS for XHTTP on :$XHTTP_PORT, cert via Let's Encrypt for $DOMAIN)"
+echo "[5/6] caddy (TLS for XHTTP on :$XHTTP_PORT, cert via Let's Encrypt for $DOMAIN)"
 if ! command -v caddy >/dev/null; then
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list
@@ -175,15 +145,17 @@ $SITES {
 }
 EOF
 
-echo "[7/7] firewall + start"
+echo "[6/6] firewall + start"
 ufw allow 22/tcp >/dev/null; ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null; ufw allow ${XHTTP_PORT}/tcp >/dev/null
 ufw --force enable >/dev/null
 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>/tmp/caddy-validate.log || { cat /tmp/caddy-validate.log; exit 1; }
 systemctl enable --now xray caddy >/dev/null
 systemctl restart xray caddy
 
-# Yandex CDN forbids POST, so uplink goes as GET (packet-up); padding settings must match the server
-XEXTRA='{"xPaddingObfsMode":true,"xPaddingPlacement":"queryInHeader","xPaddingKey":"_dc","xPaddingHeader":"X-Request-Context","xPaddingMethod":"tokenish","uplinkHTTPMethod":"GET","scMaxEachPostBytes":524288,"scMinPostsIntervalMs":150}'
+# Yandex CDN forbids POST, so uplink goes as GET (packet-up); padding settings must match the server.
+# GET bodies are dropped by the CDN, so uplink data travels in X-Data-N headers of 3-4 KB each;
+# scMaxEachPostBytes caps the whole request (the server accepts up to serverMaxHeaderBytes, default only 8 KB).
+XEXTRA='{"xPaddingObfsMode":true,"xPaddingPlacement":"queryInHeader","xPaddingKey":"_dc","xPaddingHeader":"X-Request-Context","xPaddingMethod":"tokenish","uplinkHTTPMethod":"GET","uplinkDataPlacement":"header","uplinkChunkSize":"3000-4000","scMaxEachPostBytes":16384,"scMinPostsIntervalMs":30}'
 XEXTRA_URI=$(printf %s "$XEXTRA" | jq -sRr @uri)
 REALITY_LINK="vless://$UUID@$IP:443?type=tcp&security=reality&flow=xtls-rprx-vision&sni=$DOMAIN&fp=chrome&pbk=$PUB&sid=$SID#Reality-$DOMAIN"
 XHTTP_LINK="vless://$UUID@$DOMAIN:$XHTTP_PORT?type=xhttp&security=tls&sni=$DOMAIN&path=$(printf %s "$XPATH" | jq -sRr @uri)&mode=packet-up&alpn=h2&fp=chrome&extra=$XEXTRA_URI#XHTTP-direct"
@@ -240,7 +212,6 @@ cat > "$SUBDIR/config.json" <<EOF
     "domainStrategy": "IPIfNonMatch",
     "balancers": [ { "tag": "auto", "selector": [ "reality" ], "fallbackTag": "cdn", "strategy": { "type": "leastPing" } } ],
     "rules": [
-      { "network": "udp", "port": "443", "outboundTag": "block" },
       { "protocol": [ "bittorrent" ], "outboundTag": "direct" },
       { "domain": [ "geosite:category-ru", "geosite:private" ], "outboundTag": "direct" },
       { "ip": [ "geoip:ru", "geoip:private" ], "outboundTag": "direct" },
