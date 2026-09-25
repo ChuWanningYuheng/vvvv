@@ -61,3 +61,12 @@
 - [ ] NS домена → ns1/ns2.yandexcloud.net
 - [ ] Тест Serverless Containers / CDN
 - [ ] Клиентский конфиг
+
+## Yandex CDN (рабочая схема)
+- CDN-ресурс `bc8rl3nt7u5eprwicxas`: `assets.wandlegacy.com` → origin `wandlegacy.com:8443` (HTTPS, Host: wandlegacy.com), кэш выключен.
+- CNAME `assets` → `965657b5cdcd71d7.topology.gslb.yccdn.ru` (IP 188.72.103.4 — тот же, что у cdn2.mrammor.com провайдера).
+- **POST в Yandex CDN запрещён** (и при создании, и после) → XHTTP packet-up с `uplinkHTTPMethod: GET`,
+  padding obfs как у провайдера (`_dc` / `X-Request-Context` / tokenish). Настройки padding на сервере и клиенте совпадают.
+- Сертификат: Certificate Manager `fpqmc32pid48r4h1iduc` (Let's Encrypt, DNS-проверка через CNAME `_acme-challenge.assets`).
+- Локальный e2e-тест (xray 26.3.27 + caddy): XHTTP GET-uplink и Reality проходят; без сервера — падают.
+- Reality на :443 маскируется под собственный сайт (dest 127.0.0.1:8443, Caddy), сертификат Let's Encrypt wandlegacy.com.

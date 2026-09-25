@@ -92,7 +92,11 @@ cat > /usr/local/etc/xray/config.json <<EOF
       "settings": { "clients": [ { "id": "$UUID" } ], "decryption": "none" },
       "streamSettings": {
         "network": "xhttp",
-        "xhttpSettings": { "path": "$XPATH", "mode": "auto" }
+        "xhttpSettings": {
+          "path": "$XPATH", "mode": "auto",
+          "xPaddingObfsMode": true, "xPaddingPlacement": "queryInHeader", "xPaddingKey": "_dc",
+          "xPaddingHeader": "X-Request-Context", "xPaddingMethod": "tokenish"
+        }
       },
       "sniffing": { "enabled": true, "destOverride": [ "http", "tls", "quic" ] }
     }
@@ -172,10 +176,16 @@ caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>/t
 systemctl enable --now xray caddy >/dev/null
 systemctl restart xray caddy
 
+# Yandex CDN forbids POST, so uplink goes as GET (packet-up); padding settings must match the server
+XEXTRA='{"xPaddingObfsMode":true,"xPaddingPlacement":"queryInHeader","xPaddingKey":"_dc","xPaddingHeader":"X-Request-Context","xPaddingMethod":"tokenish","uplinkHTTPMethod":"GET","scMaxEachPostBytes":524288,"scMinPostsIntervalMs":150}'
+XEXTRA_URI=$(printf %s "$XEXTRA" | jq -sRr @uri)
 REALITY_LINK="vless://$UUID@$IP:443?type=tcp&security=reality&flow=xtls-rprx-vision&sni=$DOMAIN&fp=chrome&pbk=$PUB&sid=$SID#Reality-$DOMAIN"
-XHTTP_LINK="vless://$UUID@$DOMAIN:$XHTTP_PORT?type=xhttp&security=tls&sni=$DOMAIN&path=$(printf %s "$XPATH" | jq -sRr @uri)&mode=auto&alpn=h2#XHTTP-direct"
+XHTTP_LINK="vless://$UUID@$DOMAIN:$XHTTP_PORT?type=xhttp&security=tls&sni=$DOMAIN&path=$(printf %s "$XPATH" | jq -sRr @uri)&mode=packet-up&alpn=h2&fp=chrome&extra=$XEXTRA_URI#XHTTP-direct"
+CDN_HOST="${CDN_HOST:-assets.$DOMAIN}"
+CDN_LINK="vless://$UUID@$CDN_HOST:443?type=xhttp&security=tls&sni=$CDN_HOST&host=$CDN_HOST&path=$(printf %s "$XPATH" | jq -sRr @uri)&mode=packet-up&alpn=h2&fp=chrome&extra=$XEXTRA_URI#CDN-Yandex"
 cat > /root/vpn-links.txt <<EOF
 $REALITY_LINK
+$CDN_LINK
 $XHTTP_LINK
 EOF
 
