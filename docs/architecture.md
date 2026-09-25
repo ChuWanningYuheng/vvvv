@@ -70,3 +70,7 @@
 - Сертификат: Certificate Manager `fpqmc32pid48r4h1iduc` (Let's Encrypt, DNS-проверка через CNAME `_acme-challenge.assets`).
 - Локальный e2e-тест (xray 26.3.27 + caddy): XHTTP GET-uplink и Reality проходят; без сервера — падают.
 - Reality на :443 маскируется под собственный сайт (dest 127.0.0.1:8443, Caddy), сертификат Let's Encrypt wandlegacy.com.
+
+### Важно: кэш CDN
+Опция `disableCache` при создании ресурса молча игнорируется, и по умолчанию включается `edgeCacheSettings` (86400 с),
+из-за чего XHTTP через CDN не работает. Нужно явно выставить `edgeCacheSettings.enabled = false` и сделать purge.
