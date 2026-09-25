@@ -75,6 +75,12 @@ WG_ADDR4=$(grep -m1 '^Address' $W | sed 's/.*= *//' | tr ',' '\n' | grep -m1 '\.
 WG_ADDR6=$(grep '^Address' $W | sed 's/.*= *//' | tr ',' '\n' | grep -m1 ':' | tr -d ' ')
 
 echo "[5/7] xray config"
+# AI services need a non-hosting IP -> WARP. UDP through WARP fails, so QUIC to them is dropped
+# and apps fall back to TCP; QUIC to everything else goes direct (dropping it stalls Google apps).
+WARP_DOMAINS='"geosite:openai", "domain:anthropic.com", "domain:claude.ai",
+          "domain:gemini.google.com", "domain:bard.google.com", "domain:aistudio.google.com",
+          "domain:generativelanguage.googleapis.com", "domain:alkalimakersuite-pa.clients6.google.com",
+          "domain:proactivebackend-pa.googleapis.com", "domain:ipinfo.io", "domain:ifconfig.co"'
 cat > /usr/local/etc/xray/config.json <<EOF
 {
   "log": { "loglevel": "warning" },
@@ -124,15 +130,10 @@ cat > /usr/local/etc/xray/config.json <<EOF
     "domainStrategy": "IPIfNonMatch",
     "rules": [
       { "ip": [ "geoip:private" ], "outboundTag": "block" },
-      { "network": "udp", "port": "443", "outboundTag": "block" },
+      { "network": "udp", "port": "443", "domain": [ $WARP_DOMAINS ], "outboundTag": "block" },
       { "protocol": [ "bittorrent" ], "outboundTag": "block" },
       {
-        "domain": [
-          "geosite:openai", "domain:anthropic.com", "domain:claude.ai",
-          "domain:gemini.google.com", "domain:bard.google.com", "domain:aistudio.google.com",
-          "domain:generativelanguage.googleapis.com", "domain:alkalimakersuite-pa.clients6.google.com",
-          "domain:proactivebackend-pa.googleapis.com", "domain:ipinfo.io", "domain:ifconfig.co"
-        ],
+        "domain": [ $WARP_DOMAINS ],
         "outboundTag": "warp"
       }
     ]
@@ -243,7 +244,6 @@ cat > "$SUBDIR/config.json" <<EOF
     "domainStrategy": "IPIfNonMatch",
     "balancers": [ { "tag": "auto", "selector": [ "reality" ], "fallbackTag": "cdn", "strategy": { "type": "leastPing" } } ],
     "rules": [
-      { "network": "udp", "port": "443", "outboundTag": "block" },
       { "protocol": [ "bittorrent" ], "outboundTag": "direct" },
       { "domain": [ "geosite:category-ru", "geosite:private" ], "outboundTag": "direct" },
       { "ip": [ "geoip:ru", "geoip:private" ], "outboundTag": "direct" },
