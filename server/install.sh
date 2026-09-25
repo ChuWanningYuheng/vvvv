@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# VPN exit server: Xray (VLESS-Reality + VLESS-XHTTP behind Caddy) + Cloudflare WARP for Google/AI.
+# VPN exit server: Xray (VLESS-Reality + VLESS-XHTTP behind Caddy) + Cloudflare WARP for Gemini/AI.
 # Usage (Ubuntu 22.04/24.04, as root):
 #   DOMAIN=example.com bash install.sh   # A-records for example.com and www must point here
 #   bash install.sh                      # without a domain: <ip>.sslip.io
@@ -128,9 +128,10 @@ cat > /usr/local/etc/xray/config.json <<EOF
       { "protocol": [ "bittorrent" ], "outboundTag": "block" },
       {
         "domain": [
-          "geosite:google", "geosite:openai", "domain:anthropic.com", "domain:claude.ai",
-          "domain:gemini.google.com", "domain:aistudio.google.com", "domain:generativelanguage.googleapis.com",
-          "domain:ipinfo.io", "domain:ifconfig.co"
+          "geosite:openai", "domain:anthropic.com", "domain:claude.ai",
+          "domain:gemini.google.com", "domain:bard.google.com", "domain:aistudio.google.com",
+          "domain:generativelanguage.googleapis.com", "domain:alkalimakersuite-pa.clients6.google.com",
+          "domain:proactivebackend-pa.googleapis.com", "domain:ipinfo.io", "domain:ifconfig.co"
         ],
         "outboundTag": "warp"
       }
@@ -185,7 +186,7 @@ systemctl restart xray caddy
 
 # Yandex CDN forbids POST, so uplink goes as GET (packet-up); padding settings must match the server.
 # GET bodies are dropped by the CDN, so uplink data travels in a header, in chunks that fit its header limit.
-XEXTRA='{"xPaddingObfsMode":true,"xPaddingPlacement":"queryInHeader","xPaddingKey":"_dc","xPaddingHeader":"X-Request-Context","xPaddingMethod":"tokenish","uplinkHTTPMethod":"GET","uplinkDataPlacement":"header","uplinkChunkSize":"3000-4000","scMaxEachPostBytes":524288,"scMinPostsIntervalMs":150}'
+XEXTRA='{"xPaddingObfsMode":true,"xPaddingPlacement":"queryInHeader","xPaddingKey":"_dc","xPaddingHeader":"X-Request-Context","xPaddingMethod":"tokenish","uplinkHTTPMethod":"GET","uplinkDataPlacement":"header","uplinkChunkSize":"3000-4000","scMaxEachPostBytes":524288,"scMinPostsIntervalMs":30}'
 XEXTRA_URI=$(printf %s "$XEXTRA" | jq -sRr @uri)
 REALITY_LINK="vless://$UUID@$IP:443?type=tcp&security=reality&flow=xtls-rprx-vision&sni=$DOMAIN&fp=chrome&pbk=$PUB&sid=$SID#Reality-$DOMAIN"
 XHTTP_LINK="vless://$UUID@$DOMAIN:$XHTTP_PORT?type=xhttp&security=tls&sni=$DOMAIN&path=$(printf %s "$XPATH" | jq -sRr @uri)&mode=packet-up&alpn=h2&fp=chrome&extra=$XEXTRA_URI#XHTTP-direct"

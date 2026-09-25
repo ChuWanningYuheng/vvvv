@@ -10,14 +10,14 @@
 Зарубежный VPS (Xray, server/install.sh):
   inbound  VLESS-Reality :443
   inbound  VLESS-XHTTP за Caddy :8443 (TLS через Let's Encrypt, домен <ip>.sslip.io)
-  outbound Google/Gemini/OpenAI/Anthropic ──► Cloudflare WARP
+  outbound Gemini/OpenAI/Anthropic ──► Cloudflare WARP (остальной Google, в т.ч. YouTube, — direct: WARP рвёт часть TLS-соединений)
   outbound остальное ────────────────────────► direct (IPv4)
 ```
 
 Клиент: основной путь — Reality, при недоступности — XHTTP через Яндекс; RU-домены и IP напрямую.
 
 ## Gemini / определение страны
-1. Google-трафик выходит через WARP (не RU и не «хостинговый» IP).
+1. Трафик Gemini выходит через WARP (не RU и не «хостинговый» IP).
 2. На клиенте блокировать QUIC (UDP/443) и не пускать IPv6 мимо тоннеля.
 3. Страна Google-аккаунта: policies.google.com → Country association.
 4. iOS-приложение Gemini — только в App Store не RU региона.
