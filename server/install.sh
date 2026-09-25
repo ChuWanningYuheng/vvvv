@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# VPN exit server: Xray (VLESS-Reality + VLESS-XHTTP behind Caddy) + Cloudflare WARP for Google/AI.
+# VPN exit server: Xray (VLESS-Reality + VLESS-XHTTP behind Caddy); all traffic exits directly from the VPS IP.
 # Usage (Ubuntu 22.04/24.04, as root):
 #   DOMAIN=example.com bash install.sh   # A-records for example.com and www must point here
 #   bash install.sh                      # without a domain: <ip>.sslip.io
@@ -9,25 +9,24 @@ set -euo pipefail
 
 DOMAIN_ARG="${DOMAIN:-}"
 XHTTP_PORT="${XHTTP_PORT:-8443}"                  # TLS port for XHTTP (for Yandex front / CDN)
-WARP_PORT="${WARP_PORT:-40000}"                   # local SOCKS port of the official WARP client
 STATE=/etc/vpn/state.env
 
 [ "$(id -u)" = 0 ] || { echo "run as root"; exit 1; }
 mkdir -p /etc/vpn
 
-echo "[1/7] packages"
+echo "[1/6] packages"
 export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a   # no "restart services?" dialog
 apt-get update -qq
 apt-get install -y -qq curl unzip jq openssl ufw apt-transport-https gnupg >/dev/null
 
-echo "[2/7] kernel: BBR"
+echo "[2/6] kernel: BBR"
 cat > /etc/sysctl.d/99-vpn.conf <<EOF
 net.core.default_qdisc=fq
 net.ipv4.tcp_congestion_control=bbr
 EOF
 sysctl --system >/dev/null
 
-echo "[3/7] xray"
+echo "[3/6] xray"
 if ! command -v xray >/dev/null || [ -n "${UPDATE_XRAY:-}" ]; then
   bash -c "$(curl -fsSL https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install >/dev/null
   bash -c "$(curl -fsSL https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install-geodata >/dev/null
@@ -61,36 +60,7 @@ DOMAIN=$DOMAIN
 EOF
 chmod 600 "$STATE"
 
-echo "[4/7] cloudflare warp (official client, local SOCKS proxy on :$WARP_PORT)"
-# The official client is used instead of Xray's built-in WireGuard: the latter reset part of TLS handshakes.
-if ! command -v warp-cli >/dev/null; then
-  CODENAME=$(. /etc/os-release && echo "$VERSION_CODENAME")
-  curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --yes --dearmor -o /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
-  echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $CODENAME main" \
-    > /etc/apt/sources.list.d/cloudflare-client.list
-  apt-get update -qq && apt-get install -y -qq cloudflare-warp >/dev/null
-fi
-W="warp-cli --accept-tos"
-$W registration show >/dev/null 2>&1 || $W registration new >/dev/null
-$W mode proxy >/dev/null
-$W proxy port "$WARP_PORT" >/dev/null
-$W connect >/dev/null
-# read status into a variable: `warp-cli status | grep -q` fails under pipefail (warp-cli panics on a closed pipe)
-for _ in $(seq 20); do
-  WARP_STATUS=$($W status 2>&1 || true)
-  case "$WARP_STATUS" in *Connected*) break ;; esac
-  sleep 1
-done
-case "$WARP_STATUS" in *Connected*) ;; *) echo "$WARP_STATUS"; echo "WARP did not connect"; exit 1 ;; esac
-
-echo "[5/7] xray config"
-# Google and AI services flag hosting IPs ("unusual traffic", YouTube app stalls) -> TCP to them via WARP.
-# The WARP SOCKS proxy carries TCP only. QUIC to AI services is dropped (apps fall back to TCP, keeping one IP);
-# QUIC to Google/YouTube goes direct: the YouTube iOS app barely works without QUIC.
-AI_DOMAINS='"geosite:openai", "domain:gemini.google.com", "domain:bard.google.com", "domain:aistudio.google.com",
-          "domain:generativelanguage.googleapis.com", "domain:alkalimakersuite-pa.clients6.google.com",
-          "domain:proactivebackend-pa.googleapis.com", "domain:anthropic.com", "domain:claude.ai"'
-WARP_DOMAINS="\"geosite:google\", \"geosite:youtube\", $AI_DOMAINS, \"domain:ipinfo.io\", \"domain:ifconfig.co\""
+echo "[4/6] xray config"
 cat > /usr/local/etc/xray/config.json <<EOF
 {
   "log": { "loglevel": "warning" },
@@ -126,27 +96,20 @@ cat > /usr/local/etc/xray/config.json <<EOF
   ],
   "outbounds": [
     { "tag": "direct", "protocol": "freedom", "settings": { "domainStrategy": "UseIPv4" } },
-    { "tag": "warp", "protocol": "socks", "settings": { "servers": [ { "address": "127.0.0.1", "port": $WARP_PORT } ] } },
     { "tag": "block", "protocol": "blackhole" }
   ],
   "routing": {
     "domainStrategy": "IPIfNonMatch",
     "rules": [
       { "ip": [ "geoip:private" ], "outboundTag": "block" },
-      { "network": "udp", "port": "443", "domain": [ $AI_DOMAINS ], "outboundTag": "block" },
-      { "protocol": [ "bittorrent" ], "outboundTag": "block" },
-      { "network": "udp", "outboundTag": "direct" },
-      {
-        "domain": [ $WARP_DOMAINS ],
-        "outboundTag": "warp"
-      }
+      { "protocol": [ "bittorrent" ], "outboundTag": "block" }
     ]
   }
 }
 EOF
 xray run -test -c /usr/local/etc/xray/config.json >/dev/null
 
-echo "[6/7] caddy (TLS for XHTTP on :$XHTTP_PORT, cert via Let's Encrypt for $DOMAIN)"
+echo "[5/6] caddy (TLS for XHTTP on :$XHTTP_PORT, cert via Let's Encrypt for $DOMAIN)"
 if ! command -v caddy >/dev/null; then
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list
@@ -182,7 +145,7 @@ $SITES {
 }
 EOF
 
-echo "[7/7] firewall + start"
+echo "[6/6] firewall + start"
 ufw allow 22/tcp >/dev/null; ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null; ufw allow ${XHTTP_PORT}/tcp >/dev/null
 ufw --force enable >/dev/null
 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>/tmp/caddy-validate.log || { cat /tmp/caddy-validate.log; exit 1; }

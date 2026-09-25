@@ -10,17 +10,15 @@
 Зарубежный VPS (Xray, server/install.sh):
   inbound  VLESS-Reality :443
   inbound  VLESS-XHTTP за Caddy :8443 (TLS через Let's Encrypt, домен <ip>.sslip.io)
-  outbound Google/YouTube/Gemini/OpenAI/Anthropic ──► Cloudflare WARP (официальный warp-cli, SOCKS :40000, только TCP; QUIC к Google — direct, к ИИ — блок)
-  outbound остальное ────────────────────────► direct (IPv4)
+  outbound всё ──► direct (IPv4, IP VPS в Нидерландах); блок: приватные сети, BitTorrent
 ```
 
 Клиент: основной путь — Reality, при недоступности — XHTTP через Яндекс; RU-домены и IP напрямую.
 
 ## Gemini / определение страны
-1. Трафик Google (в т.ч. YouTube, Gemini) выходит через WARP (не RU и не «хостинговый» IP).
-2. На клиенте блокировать QUIC (UDP/443) и не пускать IPv6 мимо тоннеля.
-3. Страна Google-аккаунта: policies.google.com → Country association.
-4. iOS-приложение Gemini — только в App Store не RU региона.
+1. Gemini и YouTube работают напрямую с IP VPS (NL), в т.ч. с аккаунтом региона РФ (проверено на iPhone).
+2. Через Cloudflare WARP Gemini отвечает «недоступен в вашей стране»: IP WARP помечены как relay/privacy.
+3. Если Gemini откажет: выйти из аккаунта и войти заново; страна аккаунта — policies.google.com → Country association.
 
 ## Yandex Cloud
 - Каталог `default` (`b1ggs8tlauj1ndihf49b`), сервисный аккаунт `vpn-bot` (роль editor на каталог).
@@ -78,14 +76,12 @@
 Опция `disableCache` при создании ресурса молча игнорируется, и по умолчанию включается `edgeCacheSettings` (86400 с),
 из-за чего XHTTP через CDN не работает. Нужно явно выставить `edgeCacheSettings.enabled = false` и сделать purge.
 
-### WARP: официальный клиент вместо WireGuard в Xray
-- Встроенный WireGuard-outbound Xray (профиль wgcf) сбрасывал часть TLS-соединений (`dl.google.com`, `cloudflare.com`),
-  UDP через него не работал (`write udp ...: invalid argument`).
-- Напрямую с IP хостинга Google отвечает «Unusual traffic» (Gemini), приложение YouTube висит на чёрном экране.
-- Официальный `warp-cli` в режиме proxy (`127.0.0.1:40000`): 9/9 запросов к dl.google.com / youtube.com / gemini `200`, до 39 МБ/с.
-- Прокси WARP только TCP → QUIC к ИИ-сервисам блокируется; QUIC к Google/YouTube идёт direct (без QUIC приложение YouTube на iOS почти не работает).
+### WARP (убран)
+- Пробовали пускать Google через WARP: встроенный WireGuard Xray рвал часть TLS, официальный `warp-cli` работал,
+  но Gemini через него — «недоступен в стране» (IP WARP = relay). WARP удалён, всё идёт direct.
+- Зависания YouTube/Gemini на самом деле были из-за лимита заголовков XHTTP (ниже), а не из-за IP хостинга.
 - `routeOnly` не используется: с ним IPv6-адреса от телефона шли на VPS без IPv6 (`network is unreachable`).
-- iOS: в Happ приложение YouTube не работало, в Streisand — работает.
+- iOS: в Happ приложение YouTube не работало, в Streisand — работает (до исправления лимита заголовков).
 
 ### Лимит заголовков XHTTP (причина зависаний YouTube/Gemini)
 - С `uplinkDataPlacement: header` клиент кладёт данные в заголовки `X-Data-0..N` (по `uplinkChunkSize` каждый),
